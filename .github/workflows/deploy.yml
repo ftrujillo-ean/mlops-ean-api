@@ -40,9 +40,9 @@ jobs:
     - name: Deploy to Container Apps
       run: |
         az containerapp create \
-          --name api-mi-proyecto \
-          --resource-group rg-mi-proyecto \
-          --environment env-mi-proyecto \
+          --name api-mlops-ean \
+          --resource-group rg-mlops-ean \
+          --environment env-mlops-ean \
           --image acrmlopseanftrujillo.azurecr.io/ml-api:latest \
           --registry-server acrmlopseanftrujillo.azurecr.io \
           --registry-username ${{ secrets.ACR_USERNAME }} \
@@ -54,8 +54,8 @@ jobs:
             DATABRICKS_URL=${{ secrets.DATABRICKS_URL }} \
             DATABRICKS_TOKEN=${{ secrets.DATABRICKS_TOKEN }} || \
         az containerapp update \
-          --name api-mi-proyecto \
-          --resource-group rg-mi-proyecto \
+          --name api-mlops-ean \
+          --resource-group rg-mlops-ean \
           --image acrmlopseanftrujillo.azurecr.io/ml-api:latest \
           --set-env-vars \
             DATABRICKS_URL=${{ secrets.DATABRICKS_URL }} \
