@@ -1,21 +1,32 @@
-# API FastAPI que recibe los datos de un cliente de tarjeta de credito y consulta el endpoint MLOPS_EAN de Databricks
+# API FastAPI que recibe los datos de un cliente de tarjeta de crédito
+# y consulta el endpoint credit-card-default-endpoint de Databricks
+
 import os
 import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-# Credenciales: se inyectan como variables de entorno en Azure (nunca escritas en el código)
+# Variables de entorno configuradas en Azure Container Apps
 DATABRICKS_URL = os.getenv("DATABRICKS_URL")
 DATABRICKS_TOKEN = os.getenv("DATABRICKS_TOKEN")
 
-app = FastAPI(title="API MLOps EAN", description="Predicción de pago de tarjeta de credito")
+# Endpoint correcto del modelo de crédito
+SERVING_ENDPOINT = "credit-card-default-endpoint"
 
-# Permite que el frontend (index.html) llame a la API desde otro dominio
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app = FastAPI(
+    title="API MLOps EAN",
+    description="Predicción de default de tarjeta de crédito"
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"]
+)
 
 
-# Campos que espera el modelo (deben coincidir con la firma registrada en MLflow)
 class CreditCard(BaseModel):
     LIMIT_BAL: int = Field(..., ge=10000, le=1000000)
 
@@ -48,7 +59,7 @@ class CreditCard(BaseModel):
     PAY_AMT5: int = Field(..., ge=0, le=426529)
     PAY_AMT6: int = Field(..., ge=0, le=528666)
 
-    # One-Hot Encoding de estado civil
+    # One-Hot Encoding estado civil
     MARRIAGE_Single: int = Field(..., ge=0, le=1)
     MARRIAGE_Married: int = Field(..., ge=0, le=1)
     MARRIAGE_Other: int = Field(..., ge=0, le=1)
@@ -56,34 +67,86 @@ class CreditCard(BaseModel):
 
 @app.get("/health")
 def health():
-    # Verifica que la API está viva y que tiene configuradas las credenciales
-    return {"status": "ok", "databricks_configurado": bool(DATABRICKS_URL and DATABRICKS_TOKEN)}
+    endpoint_url = (
+        f"{DATABRICKS_URL}/serving-endpoints/"
+        f"{SERVING_ENDPOINT}/invocations"
+    ) if DATABRICKS_URL else None
+
+    return {
+        "status": "ok",
+        "databricks_configurado": bool(
+            DATABRICKS_URL and DATABRICKS_TOKEN
+        ),
+        "serving_endpoint": SERVING_ENDPOINT,
+        "endpoint_url": endpoint_url
+    }
 
 
 @app.post("/predecir")
-def predecir(est: CreditCard):
-    if not (DATABRICKS_URL and DATABRICKS_TOKEN):
-        raise HTTPException(status_code=500, detail="Faltan DATABRICKS_URL o DATABRICKS_TOKEN")
+def predecir(cliente: CreditCard):
 
-    # Databricks exige el formato dataframe_records
-    payload = {"dataframe_records": [est.model_dump()]}
+    if not DATABRICKS_URL:
+        raise HTTPException(
+            status_code=500,
+            detail="DATABRICKS_URL no configurada"
+        )
+
+    if not DATABRICKS_TOKEN:
+        raise HTTPException(
+            status_code=500,
+            detail="DATABRICKS_TOKEN no configurado"
+        )
+
+    endpoint_url = (
+        f"{DATABRICKS_URL}/serving-endpoints/"
+        f"{SERVING_ENDPOINT}/invocations"
+    )
+
+    payload = {
+        "dataframe_records": [
+            cliente.model_dump()
+        ]
+    }
 
     try:
-        r = requests.post(
-            DATABRICKS_URL,
-            headers={"Authorization": f"Bearer {DATABRICKS_TOKEN}"},
+        response = requests.post(
+            endpoint_url,
+            headers={
+                "Authorization": f"Bearer {DATABRICKS_TOKEN}",
+                "Content-Type": "application/json"
+            },
             json=payload,
-            timeout=120,  # margen para el arranque en frío del endpoint
+            timeout=120
         )
+
     except requests.exceptions.Timeout:
-        raise HTTPException(status_code=504, detail="Databricks tardó demasiado (arranque en frío). Intente de nuevo.")
+        raise HTTPException(
+            status_code=504,
+            detail="Databricks tardó demasiado (cold start)"
+        )
 
-    if r.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"Error de Databricks: {r.text}")
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Error conectando con Databricks: {str(e)}"
+        )
 
-    pred = int(r.json()["predictions"][0])  # 1 = aprueba, 0 = reprueba
+    if response.status_code != 200:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Error Databricks [{response.status_code}]: {response.text}"
+        )
+
+    resultado = response.json()
+
+    prediccion = int(resultado["predictions"][0])
+
     return {
-        "prediccion": pred,
-        "resultado": "Realiza pago ✅" if pred == 1 else "Entra en default ❌",
-        "datos_recibidos": est.model_dump(),
+        "prediccion": prediccion,
+        "resultado": (
+            "Realiza pago ✅"
+            if prediccion == 1
+            else "Entra en default ❌"
+        ),
+        "modelo": "credit-card-default-endpoint"
     }
