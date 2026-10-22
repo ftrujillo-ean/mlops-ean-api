@@ -145,7 +145,7 @@ def predecir(cliente: CreditCard):
         "prediccion": prediccion,
         "resultado": (
             "Realiza pago ✅"
-            if prediccion == 1
+            if prediccion == 0
             else "Entra en default ❌"
         ),
         "modelo": "credit-card-default-endpoint"
